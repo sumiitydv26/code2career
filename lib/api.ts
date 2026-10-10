@@ -1,4 +1,5 @@
 import { Roadmap, NodeDetail, RoadmapNode, RoadmapSchema, NodeDetailSchema } from "./schema";
+import { getRoadmapForGoal, CLIMATE_TECH_ROADMAP, getMockNodeDetail } from "./mock";
 
 interface FetchWithTimeoutOptions extends RequestInit {
   timeoutMs?: number;
@@ -20,22 +21,6 @@ async function fetchWithTimeout(url: string, options: FetchWithTimeoutOptions = 
   }
 }
 
-async function requestWithRetry<T>(
-  fn: () => Promise<T>,
-  retries: number = 1
-): Promise<T> {
-  try {
-    return await fn();
-  } catch (error) {
-    if (retries > 0) {
-      // Wait 1s and retry once
-      await new Promise((r) => setTimeout(r, 1000));
-      return await fn();
-    }
-    throw error;
-  }
-}
-
 export interface GenerateRoadmapPayload {
   goal: string;
   hoursPerWeek?: number;
@@ -44,28 +29,29 @@ export interface GenerateRoadmapPayload {
 }
 
 export async function generateRoadmap(payload: GenerateRoadmapPayload): Promise<Roadmap> {
-  return requestWithRetry(async () => {
+  try {
     const res = await fetchWithTimeout("/api/roadmap", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-      timeoutMs: 30000,
+      timeoutMs: 8000,
     });
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || `Failed to generate roadmap (HTTP ${res.status})`);
+    if (res.ok) {
+      const json = await res.json();
+      const validated = RoadmapSchema.safeParse(json);
+      if (validated.success) {
+        return validated.data;
+      }
     }
+  } catch {
+    // Static hosting (GitHub Pages) fallback below
+  }
 
-    const json = await res.json();
-    const validated = RoadmapSchema.safeParse(json);
-    if (!validated.success) {
-      console.error("Roadmap validation issues:", validated.error.issues);
-      throw new Error(`Invalid roadmap data received: ${validated.error.issues[0]?.message || "Validation failed"}`);
-    }
-
-    return validated.data;
-  }, 1);
+  // Fallback for static deployments (e.g. GitHub Pages)
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  const fallback = getRoadmapForGoal(payload.goal || CLIMATE_TECH_ROADMAP.goal);
+  return RoadmapSchema.parse(fallback);
 }
 
 export interface FetchNodeDetailPayload {
@@ -74,26 +60,28 @@ export interface FetchNodeDetailPayload {
 }
 
 export async function fetchNodeDetail(payload: FetchNodeDetailPayload): Promise<NodeDetail> {
-  return requestWithRetry(async () => {
+  try {
     const res = await fetchWithTimeout("/api/node-detail", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-      timeoutMs: 30000,
+      timeoutMs: 8000,
     });
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || `Failed to fetch node advice (HTTP ${res.status})`);
+    if (res.ok) {
+      const json = await res.json();
+      const validated = NodeDetailSchema.safeParse(json);
+      if (validated.success) {
+        return validated.data;
+      }
     }
+  } catch {
+    // Static hosting (GitHub Pages) fallback below
+  }
 
-    const json = await res.json();
-    const validated = NodeDetailSchema.safeParse(json);
-    if (!validated.success) {
-      console.error("NodeDetail validation issues:", validated.error.issues);
-      throw new Error(`Invalid node advice data received: ${validated.error.issues[0]?.message || "Validation failed"}`);
-    }
-
-    return validated.data;
-  }, 1);
+  // Fallback for static deployments (e.g. GitHub Pages)
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  const fallback = getMockNodeDetail(payload.node.id, payload.node.title, payload.goal);
+  return NodeDetailSchema.parse(fallback);
 }
+
